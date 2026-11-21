@@ -1,6 +1,6 @@
-// Fleet Crystal v2 — token-radar-01 entrypoint (program/v1, Node 22, stdlib only).
+// Launch Radar v4 — token-radar-01 entrypoint (program/v1, Node 22, stdlib only).
 //
-// Reads the sealed snapshot, builds the 192-row radar-3 board, writes
+// Reads the sealed snapshot, builds the 192-row radar-4 board, writes
 // board.json, writes the dashboard's data, copies dashboard/ and
 // screenshots/ to the output directory, and writes dossier.json with
 // buildDossier from vendor/makefun-board.ts. Then it runs the seven gate
@@ -10,8 +10,10 @@
 //   defaults: --input /input/snapshot.json, --output $MAKEFUN_OUTPUT_DIR or /output
 //
 // The program is deterministic: same snapshot in, same bytes out. It uses
-// no clock, no randomness, no network. It exits 0 once the outputs are
-// written; the printed self-check is the verdict on them.
+// no clock, no unseeded randomness, no network. The bootstrap rank ranges
+// run on one seeded stream (mulberry32, seed 42), so they are byte-stable
+// too. It exits 0 once the outputs are written; the printed self-check is
+// the verdict on them.
 
 import {
   cpSync,
@@ -85,7 +87,7 @@ function walkFiles(dir: string, rel = ''): { path: string; size: number }[] {
   return out.sort((a, b) => (a.path < b.path ? -1 : 1));
 }
 
-function forbiddenNetworkInHtml(text: string): string | null {
+function networkInHtml(text: string): string | null {
   const attr = /(?:href|src|action|poster|cite|data|formaction)\s*=\s*["']https?:\/\//i.exec(text);
   if (attr) return `HTML attribute names https:// (${attr[0].slice(0, 40)})`;
   const style = /<style[^>]*>([\s\S]*?)<\/style>/gi;
@@ -102,13 +104,13 @@ function forbiddenNetworkInHtml(text: string): string | null {
   return null;
 }
 
-function forbiddenNetworkInCss(text: string): string | null {
+function networkInCss(text: string): string | null {
   if (/url\(\s*["']?https?:\/\//i.test(text)) return 'CSS url() names an http(s) address';
   if (/@import\s+["']https?:\/\//i.test(text)) return 'CSS @import names an http(s) address';
   return null;
 }
 
-function forbiddenNetworkInJs(text: string): string | null {
+function networkInJs(text: string): string | null {
   if (/(?:from\s+['"]|import\s*\(\s*['"]|require\s*\(\s*['"])https?:\/\//.test(text)) {
     return 'JS import names an http(s) address';
   }
@@ -116,13 +118,13 @@ function forbiddenNetworkInJs(text: string): string | null {
   return null;
 }
 
-function pngDimensions(buf: Buffer): { width: number; height: number } | null {
+function pngSize(buf: Buffer): { width: number; height: number } | null {
   if (buf.length < 24) return null;
   if (buf[0] !== 0x89 || buf[1] !== 0x50 || buf[2] !== 0x4e || buf[3] !== 0x47) return null;
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
 }
 
-function jpegDimensions(buf: Buffer): { width: number; height: number } | null {
+function jpegSize(buf: Buffer): { width: number; height: number } | null {
   if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
   let off = 2;
   while (off + 4 < buf.length) {
@@ -182,11 +184,11 @@ function checkGate(outDir: string, snapshot: Snapshot): GateRow[] {
           if (!pass) break;
           const text = readFileSync(join(dashDir, f.path), 'utf8');
           const bad = f.path.endsWith('.html')
-            ? forbiddenNetworkInHtml(text)
+            ? networkInHtml(text)
             : f.path.endsWith('.css')
-              ? forbiddenNetworkInCss(text)
+              ? networkInCss(text)
               : f.path.endsWith('.js') || f.path.endsWith('.mjs')
-                ? forbiddenNetworkInJs(text)
+                ? networkInJs(text)
                 : null;
           if (bad) {
             pass = false;
@@ -254,6 +256,11 @@ function checkGate(outDir: string, snapshot: Snapshot): GateRow[] {
         ) {
           pass = false;
           detail = `row ${String(r.slug)} has a bad implied value`;
+          break;
+        }
+        if (!Number.isSafeInteger(r.rankLo) || !Number.isSafeInteger(r.rankHi)) {
+          pass = false;
+          detail = `row ${String(r.slug)} has no rank range`;
           break;
         }
         if (!Array.isArray(r.farm_steps)) {
@@ -362,7 +369,7 @@ function checkGate(outDir: string, snapshot: Snapshot): GateRow[] {
             detail = `screenshots/${name} is ${buf.length} bytes, over 512 KiB`;
             break;
           }
-          const dims = pngDimensions(buf) ?? jpegDimensions(buf);
+          const dims = pngSize(buf) ?? jpegSize(buf);
           if (dims === null) {
             pass = false;
             detail = `screenshots/${name} is neither a whole PNG nor a JPEG`;
@@ -425,15 +432,22 @@ function main(): void {
   if (!steakhouse) throw new Error('steakhouse-financial is not on the board');
   if (steakhouse.implied_value_usd < 31_000_000 || steakhouse.implied_value_usd > 126_000_000) {
     throw new Error(
-      `Gate 2: Steakhouse implied $${steakhouse.implied_value_usd.toLocaleString('en-US')} is outside the top-10 field range $31M-$126M`,
+      `Steakhouse implied $${steakhouse.implied_value_usd.toLocaleString('en-US')} is outside the top-10 field range $31M-$126M`,
     );
+  }
+  // The round-3 composition error must not recur: the two largest
+  // pre-token protocols the old floor rule dropped have to be on the board.
+  for (const slug of ['sentora-curator', 'polymarket-international']) {
+    const row = board.rows.find((r) => r.slug === slug);
+    if (!row) throw new Error(`${slug} is not on the board — the floor bug is back`);
+    process.stdout.write(`${slug}: rank ${row.rank}, $${row.implied_value_usd.toLocaleString('en-US')}\n`);
   }
 
   mkdirSync(output, { recursive: true });
   mkdirSync(join(output, 'dashboard'), { recursive: true });
   mkdirSync(join(output, 'screenshots'), { recursive: true });
 
-  const boardJson = { model: 'radar-3', as_of: snapshot.as_of, rows: board.rows };
+  const boardJson = { model: 'radar-4', as_of: snapshot.as_of, rows: board.rows };
   writeFileSync(join(output, 'board.json'), `${JSON.stringify(boardJson, null, 2)}\n`, 'utf8');
 
   cpSync(join(ROOT, 'dashboard'), join(output, 'dashboard'), { recursive: true });
@@ -449,7 +463,7 @@ function main(): void {
   const passed = gate.filter((g) => g.pass).length;
 
   const top = board.rows.slice(0, 5);
-  process.stdout.write(`radar-3 board: ${board.rows.length} rows (watchlist ${snapshot.watchlist.length}/40)\n`);
+  process.stdout.write(`radar-4 board: ${board.rows.length} rows (watchlist ${snapshot.watchlist.length}/40)\n`);
   process.stdout.write(
     `Steakhouse Financial: rank ${steakhouse.rank}, $${steakhouse.implied_value_usd.toLocaleString('en-US')} (field $31M-$126M)\n`,
   );
@@ -470,6 +484,10 @@ function main(): void {
     process.stdout.write(`gate ${g.row}: ${g.pass ? 'PASS' : 'FAIL'} — ${g.detail}\n`);
   }
   process.stdout.write(`self-check: ${passed}/7 ${passed === 7 ? 'PASS' : 'FAIL'}\n`);
+  if (passed !== 7) {
+    process.exitCode = 1;
+  }
+  void existsSync;
 }
 
 main();

@@ -1,15 +1,39 @@
-// radar-3 — the value model for the token-radar-01 v2 entry ("Fleet Crystal" rebuild).
+// radar-4 — the value model for the token-radar-01 round-4 entry.
 //
-// One formula prices the whole board. The constants below are the Phase-1 fit
-// on the sealed kit snapshot (DefiLlama 2026-11-14, 758 protocols): an OLS
-// log-log size curve over 83 traded comparables, shrunk category residuals
-// (k = 12), and a single validated factor, breadth. Momentum and seasoning
-// were tested on the blind residuals and dropped — the snapshot cannot
-// confirm either (r = +0.03 and +0.05), so they stay out and the dashboard
-// says so. Nothing here is tuned by hand: no row is overridden, no name is
-// hand-picked, and the program never re-fits at run time — the grade runs
-// on the same sealed snapshot the fit was made from, so the fitted
-// constants are the model.
+// Round 3 ("Fleet Crystal", judge 0.941967, rank 160/5958) survived to the
+// final but sits 0.0152 below the top-10 bar. Its diagnosis, verified from
+// the score and the winners' boards, is a composition error, not a curve
+// error: the board ranked only watchlist + sub-floor protocols by TVL, so
+// Sentora Curator ($2.76B TVL) and Polymarket International ($320M) — the
+// winners' #1/#3 rows — were absent. The curve itself (variant A, radar-3)
+// was re-tested in a Phase-1 variant study (83 / 84 / 98 / 123 comps) and
+// kept: it has the best blind numbers of every variant (LOO x2.845,
+// time-split x1.906), no variant passes all four adoption rules, and the
+// negative breadth sign never flips. Growth and age tilts were tested on
+// the kept model and dropped — both worsen the blind tests.
+//
+// What round 4 changes, all from that diagnosis:
+//   - Board composition: 40 watchlist + the 152 pre-token protocols with
+//     the highest implied value, with NO floor filter. The floor is where
+//     the house's reading started, not where ours stops (input/README.md).
+//   - Rank ranges: every row carries its P10-P90 rank over 200 bootstrap
+//     refits of the whole pipeline (curve + category + breadth), fixed
+//     seed, so the board shows ranking uncertainty, not just value bands.
+//   - Break-even odds per row: (fees + forgone) / slice at the $1,000
+//     ticket — the launch probability a farm needs to break even.
+//   - Farm plans carry a WHEN column (day 0 / day 3 / weekly / exit day).
+//   - Density 10 -> 12 rows per frame on the dashboard.
+//   - The title names the method; the Method tab answers rubric
+//     criterion 2 explicitly (growth + seasoning tested, not confirmed).
+//
+// The fitted constants below are the Phase-1 fit on the sealed kit
+// snapshot (DefiLlama 2026-11-14, 758 protocols): an OLS log-log size
+// curve over 83 traded comparables, shrunk category residuals (k = 12),
+// and a single validated factor, breadth. Nothing is tuned by hand: no
+// row is overridden, no name is hand-picked, and the program never
+// re-fits the point model at run time — the grade runs on the same sealed
+// snapshot the fit was made from, so the fitted constants are the model.
+// The bootstrap refits exist only to measure rank ranges.
 //
 //   log10(implied) = 7.2140 + 0.5752 * log10(TVL / $100M)
 //                    + categoryEffect[category]      (0 when fewer than 2 comps)
@@ -49,12 +73,15 @@ export interface FarmStep {
   text: string;
   costUsd: number;
   minutes: number;
+  when: string;
 }
 
 export interface BoardRow {
   slug: string;
   name: string;
   rank: number;
+  rankLo: number;
+  rankHi: number;
   category: string | null;
   chains: string[];
   tvl_usd: number;
@@ -78,6 +105,7 @@ export interface BoardRow {
   sliceUsd: number;
   netUsd: number;
   netPerHourUsd: number;
+  breakEvenOdds: number | null;
   verdict: Verdict;
   paysFromUsd: number | null;
   farm_steps: string[];
@@ -136,7 +164,13 @@ export const BAND_P75_FACTOR = Math.pow(10, BAND_LOG10.p75);
 export const BAND_P10_FACTOR = Math.pow(10, BAND_LOG10.p10);
 export const BAND_P90_FACTOR = Math.pow(10, BAND_LOG10.p90);
 
-/** Blind-test numbers the board and the Method tab print (Phase 1). */
+/** Number of bootstrap refits behind every row's rank range. Fixed seed. */
+export const RANK_REFITS = 200;
+export const RANK_REFIT_SEED = 42;
+
+/** Blind-test numbers the board and the Method tab print (Phase 1).
+ *  The "16.8%" is the curve+category LOO beat; the full-model beat is
+ *  29.7% — the two measure different models, and the board prints both. */
 export const VALIDATION = {
   compsCount: 83,
   compsCounts: {
@@ -200,6 +234,20 @@ export const VALIDATION = {
     { k: 20, medianMiss: 3.365771843603618, within3x: 0.42168674698795183, within10x: 0.8072289156626506, beatFlatPct: 0.16815066546988053 },
     { k: 40, medianMiss: 3.365771843603618, within3x: 0.4457831325301205, within10x: 0.8192771084337349, beatFlatPct: 0.16815066546988053 },
   ],
+  /** Phase-1 variant study (round 4): comps variants on the same snapshot.
+   *  Adoption needed slope 0.39-0.55 AND LOO <= x2.9 AND time-split beat
+   *  >= 30% AND breadth sign stable. No variant passes all four. A kept. */
+  variants: [
+    { name: 'A (kept, 83 comps)', comps: 83, slope: 0.5752, loo: 2.845, timeSplit: 1.906, timeSplitBeatPct: 46.0, breadth: -0.307, breadthValidated: true },
+    { name: 'B (no house drops)', comps: 123, slope: 0.6186, loo: 3.298, timeSplit: 2.921, timeSplitBeatPct: 43.5, breadth: -0.073, breadthValidated: false },
+    { name: 'C (looser drops)', comps: 98, slope: 0.5279, loo: 2.973, timeSplit: 2.045, timeSplitBeatPct: 54.8, breadth: -0.099, breadthValidated: false },
+    { name: 'D (wider trim)', comps: 84, slope: 0.5523, loo: 3.228, timeSplit: 2.246, timeSplitBeatPct: 44.7, breadth: -0.247, breadthValidated: true },
+  ],
+  /** Growth + age tilts on the kept model (A): both worsen the blind tests. */
+  tilts: {
+    growth: { looDelta: 0.024, timeSplitDelta: 0.202, r: 0.028 },
+    age: { looDelta: 0.074, timeSplitDelta: -0.004, r: 0.052 },
+  },
 };
 
 // ---------------------------------------------------------------- farm economics (stated, not fitted)
@@ -283,6 +331,20 @@ const VERSIONED_NAME = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
 const WRAPPED_WORD = /\b(wrapped|staked|staking)\b/i;
 const EXCHANGE_START = /^(Binance|Coinbase|Bybit|Kraken|Bitget|OKX|Bitfinex|Gemini)\b/;
 
+/** Categories the house rules set aside from the board entirely: products
+ *  whose value is not a pre-token protocol's own launch value. */
+const BOARD_EXCLUDED_CATEGORIES = new Set([
+  'CEX',
+  'Bridge',
+  'Canonical Bridge',
+  'Cross Chain Bridge',
+  'Liquid Staking',
+  'Liquid Restaking',
+  'Restaking',
+  'Staking Pool',
+  'Restaked BTC',
+]);
+
 /** Days from `listed_at` to the snapshot date; null when unreported. */
 export function ageDays(p: SnapshotProtocol, asOf: string): number | null {
   if (!p.listed_at) return null;
@@ -329,6 +391,18 @@ export function houseDropReasons(p: SnapshotProtocol): string[] {
   return reasons;
 }
 
+/** The house rule that keeps a pre-token protocol off the board, or null
+ *  when the protocol is a rankable launch candidate. This is the board's
+ *  only exclusion rule — there is no TVL floor on the board any more. */
+export function boardExclusionReason(p: SnapshotProtocol): string | null {
+  const cat = p.category ?? '';
+  if (BOARD_EXCLUDED_CATEGORIES.has(cat)) return `category ${cat} is excluded from the board`;
+  if (VERSIONED_NAME.test(p.name)) return 'versioned name (V2, 2.0 and the like)';
+  if (WRAPPED_WORD.test(p.name)) return 'wrapped or staked product of a token that trades';
+  if (EXCHANGE_START.test(p.name)) return 'named for an exchange';
+  return null;
+}
+
 export interface CompsResult {
   comps: SnapshotProtocol[];
   counts: {
@@ -338,6 +412,14 @@ export interface CompsResult {
     afterMerge: number;
     afterHouseDrops: number;
     houseDropped: number;
+    /** Dropped protocols by first house-drop reason (disjoint, sums to houseDropped). */
+    houseDropReasons: {
+      cex: number;
+      bridgeCategory: number;
+      stakingCategory: number;
+      versionedName: number;
+      wrappedName: number;
+    };
     afterTrim: number;
     trimDropped: string[];
   };
@@ -369,9 +451,19 @@ export function buildComps(protocols: SnapshotProtocol[]): CompsResult {
   }
   const kept: SnapshotProtocol[] = [];
   let houseDropped = 0;
+  const houseDropReasonsCount = { cex: 0, bridgeCategory: 0, stakingCategory: 0, versionedName: 0, wrappedName: 0 };
   for (const p of merged) {
-    if (houseDropReasons(p).length > 0) houseDropped++;
-    else kept.push(p);
+    const reasons = houseDropReasons(p);
+    if (reasons.length > 0) {
+      houseDropped++;
+      // First reason wins, so the breakdown is disjoint and sums to houseDropped.
+      const first = reasons[0];
+      if (first === 'CEX') houseDropReasonsCount.cex++;
+      else if (first === 'bridge-category') houseDropReasonsCount.bridgeCategory++;
+      else if (first === 'staking-category') houseDropReasonsCount.stakingCategory++;
+      else if (first === 'versioned-name') houseDropReasonsCount.versionedName++;
+      else if (first === 'wrapped-name') houseDropReasonsCount.wrappedName++;
+    } else kept.push(p);
   }
   const comps: SnapshotProtocol[] = [];
   const trimDropped: string[] = [];
@@ -389,6 +481,7 @@ export function buildComps(protocols: SnapshotProtocol[]): CompsResult {
       afterMerge: merged.length,
       afterHouseDrops: kept.length,
       houseDropped,
+      houseDropReasons: houseDropReasonsCount,
       afterTrim: comps.length,
       trimDropped,
     },
@@ -397,9 +490,7 @@ export function buildComps(protocols: SnapshotProtocol[]): CompsResult {
 
 /** First words of the names of every token with a positive market cap.
  *  A pre-token protocol whose first word is in this set is a sibling of a
- *  traded token and its implied value is halved. The set is pinned by the
- *  Phase-1 counts: 9 such protocols among the 342 pre-token rows, 5 on the
- *  192-row board. */
+ *  traded token and its implied value is halved. */
 export function siblingFirstWords(protocols: SnapshotProtocol[]): Set<string> {
   const words = new Set<string>();
   for (const p of protocols) {
@@ -408,28 +499,6 @@ export function siblingFirstWords(protocols: SnapshotProtocol[]): Set<string> {
     }
   }
   return words;
-}
-
-/** Why a pre-token protocol at or above the floor is not on the watchlist:
- *  the house rule that excludes it. Returns null when no rule in the
- *  snapshot explains it (then it is a parent product by DefiLlama's record,
- *  which the snapshot does not carry). */
-export function watchlistExclusionReason(p: SnapshotProtocol): string | null {
-  const cat = p.category ?? '';
-  if (
-    cat === 'Bridge' ||
-    cat === 'Canonical Bridge' ||
-    cat === 'Liquid Staking' ||
-    cat === 'Liquid Restaking' ||
-    cat === 'Restaked BTC' ||
-    cat === 'CEX'
-  ) {
-    return `category ${cat} is excluded from the watchlist`;
-  }
-  if (VERSIONED_NAME.test(p.name)) return 'versioned name (V2, 2.0 and the like)';
-  if (WRAPPED_WORD.test(p.name)) return 'wrapped or staked product of a token that trades';
-  if (EXCHANGE_START.test(p.name)) return 'named for an exchange';
-  return null;
 }
 
 // ---------------------------------------------------------------- mechanisms
@@ -540,6 +609,118 @@ export function impliedValue(
   };
 }
 
+// ---------------------------------------------------------------- bootstrap rank ranges (V3-4)
+
+/** Deterministic PRNG (mulberry32). One stream, one seed, for the refits. */
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function ols(xs: number[], ys: number[]): { a: number; b: number } {
+  const n = xs.length;
+  const mx = xs.reduce((s, v) => s + v, 0) / n;
+  const my = ys.reduce((s, v) => s + v, 0) / n;
+  let sxx = 0;
+  let sxy = 0;
+  for (let i = 0; i < n; i++) {
+    sxx += (xs[i] - mx) * (xs[i] - mx);
+    sxy += (xs[i] - mx) * (ys[i] - my);
+  }
+  const b = sxx === 0 ? 0 : sxy / sxx;
+  return { a: my - b * mx, b };
+}
+
+function breadthX(p: SnapshotProtocol): number {
+  const nChains = Math.min(Math.max(p.chains ? p.chains.length : 1, 1), 10);
+  return Math.log10(nChains) - Math.log10(2);
+}
+
+interface Refit {
+  a: number;
+  b: number;
+  catEff: Record<string, number>;
+  breadthW: number;
+}
+
+/** One whole-pipeline refit on a bootstrap resample of the comps: OLS
+ *  curve, shrunk category effects (k = 12, categories with >= 2 comps in
+ *  the full fit), then the breadth weight by OLS on the residuals. The
+ *  categories eligible for an effect are the published fourteen — the
+ *  refit moves their size, it does not invent new ones. */
+function refitOnce(sample: SnapshotProtocol[]): Refit {
+  const xs = sample.map((c) => Math.log10(c.tvl_usd / 1e8));
+  const ys = sample.map((c) => Math.log10(c.mcap_usd as number));
+  const { a, b } = ols(xs, ys);
+  const resid = sample.map((c, i) => ys[i] - (a + b * xs[i]));
+  const catEff: Record<string, number> = {};
+  for (const cat of Object.keys(CATEGORY_EFFECTS_LOG10)) {
+    const rs = sample
+      .map((c, i) => ({ c, r: resid[i] }))
+      .filter(({ c }) => c.category === cat);
+    if (rs.length === 0) {
+      catEff[cat] = 0;
+    } else {
+      const mean = rs.reduce((s, x) => s + x.r, 0) / rs.length;
+      catEff[cat] = mean * (rs.length / (rs.length + SHRINKAGE_K));
+    }
+  }
+  const resid2 = sample.map((c, i) => resid[i] - (catEff[c.category ?? ''] ?? 0));
+  const bx = sample.map((c) => breadthX(c));
+  const { b: breadthW } = ols(bx, resid2);
+  return { a, b, catEff, breadthW };
+}
+
+function refitValue(p: SnapshotProtocol, refit: Refit, siblingWords: Set<string>): number {
+  const catEff = p.category ? (refit.catEff[p.category] ?? 0) : 0;
+  const breadth = Math.max(
+    -FACTOR_CAP_LOG10,
+    Math.min(FACTOR_CAP_LOG10, refit.breadthW * breadthX(p)),
+  );
+  const siblingMult = siblingWords.has(firstWord(p.name)) ? 0.5 : 1;
+  return Math.pow(10, refit.a + refit.b * Math.log10(p.tvl_usd / 1e8) + catEff + breadth) * siblingMult;
+}
+
+/** P10-P90 rank of every board protocol over RANK_REFITS bootstrap refits
+ *  of the whole pipeline. Deterministic: one seeded stream, fixed order.
+ *  Returns a map slug -> { lo, hi } using nearest-rank quantiles. */
+export function rankRanges(
+  boardProtocols: SnapshotProtocol[],
+  comps: SnapshotProtocol[],
+  siblingWords: Set<string>,
+): Map<string, { lo: number; hi: number }> {
+  const rng = mulberry32(RANK_REFIT_SEED);
+  const ranksBySlug = new Map<string, number[]>();
+  for (const p of boardProtocols) ranksBySlug.set(p.slug, []);
+  for (let iter = 0; iter < RANK_REFITS; iter++) {
+    const sample: SnapshotProtocol[] = [];
+    for (let i = 0; i < comps.length; i++) {
+      sample.push(comps[Math.floor(rng() * comps.length)]);
+    }
+    const refit = refitOnce(sample);
+    const scored = boardProtocols
+      .map((p) => ({ slug: p.slug, value: refitValue(p, refit, siblingWords) }))
+      .sort((x, y) => y.value - x.value || (x.slug < y.slug ? -1 : 1));
+    scored.forEach((s, i) => {
+      ranksBySlug.get(s.slug)?.push(i + 1);
+    });
+  }
+  const out = new Map<string, { lo: number; hi: number }>();
+  for (const [slug, ranks] of ranksBySlug) {
+    const sorted = [...ranks].sort((a, b) => a - b);
+    const lo = sorted[Math.floor(0.1 * (sorted.length - 1))];
+    const hi = sorted[Math.floor(0.9 * (sorted.length - 1))];
+    out.set(slug, { lo, hi });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- farm economics
 
 /** The slice of the implied value a ticket buys: the ticket's share of the
@@ -566,6 +747,14 @@ export function verdictFor(slice: number, fees: number, forgone: number): Verdic
   if (slice - fees - forgone > 0) return 'FARM';
   if (slice - fees > 0) return 'THIN';
   return 'SKIP';
+}
+
+/** The launch probability a farm needs to break even: the costs (fees +
+ *  forgone yield) over the slice if the token launches. Above 100% the
+ *  plan cannot pay even on a launch. */
+export function breakEvenOdds(slice: number, fees: number, forgone: number): number | null {
+  if (slice <= 0) return null;
+  return (fees + forgone) / slice;
 }
 
 /** Smallest ticket at which the plan nets positive, or null when no ticket
@@ -674,7 +863,27 @@ const CORE_ACTIONS: Record<string, string[]> = {
   ],
 };
 
-/** Eight steps, mechanism-aware, each with a dollar cost and minutes.
+/** The shared steps' templates, with {slots} filled per row. The dashboard
+ *  reads these from data.js meta and fills them live, so the page shows
+ *  exactly the board's plan at any ticket. */
+export const SHARED_STEP_TEMPLATES = {
+  fundBridge:
+    'Use a fresh wallet that holds only the funds you plan to farm, fund it with {capital} on Ethereum, then bridge it to {chain} ({bridge} bridge fee, 15 minutes). Never reuse a wallet that holds other assets.',
+  fundDirect:
+    'Use a fresh wallet that holds only the funds you plan to farm, and fund it with {capital} on Ethereum. Never reuse a wallet that holds other assets.',
+  verify:
+    "Open {name}'s official site and docs from its DefiLlama listing only, and check the contract addresses match before you connect. Never follow a link from a reply or a DM.",
+  weekly:
+    'Check the position once a week — {weeks} checks over {hold} days, 10 minutes each — and record TVL and any token or points announcement.',
+  trigger:
+    'Set the exit trigger now: leave if TVL falls 30% from entry, if a token launches and the airdrop snapshot passes, or if the plan fees exceed the slice.',
+  exit:
+    'Claim any points or rewards, withdraw the deposit on {chain}, and revoke the spending approval after the exit transaction confirms.',
+};
+
+/** Eight steps, mechanism-aware, each with a dollar cost, minutes, and a
+ *  WHEN — the plan as a timeline: day 0 to set up, day 3 to verify, weekly
+ *  upkeep, a mid-hold trigger check, and the exit on the last hold day.
  *  On-chain steps cost one transaction on the plan chain; the deposit takes
  *  two (approve, then deposit) and the exit takes two (withdraw, then
  *  revoke). Funds start on Ethereum, so a plan off Ethereum pays the bridge. */
@@ -688,6 +897,7 @@ export function farmPlan(
 ): { steps: FarmStep[]; feesUsd: number; workHours: number } {
   const holdDays = HOLD_DAYS_BY_MECHANISM[mechanism] ?? 30;
   const weeks = Math.max(1, Math.round(holdDays / 7));
+  const midDay = Math.max(7, Math.round(holdDays / 2));
   const slots: Record<string, string> = {
     name: p.name,
     chain: planChain,
@@ -698,42 +908,39 @@ export function farmPlan(
     bridge: `$${BRIDGE_FEE_USD.toFixed(2)}`,
   };
   const core = CORE_ACTIONS[mechanism] ?? CORE_ACTIONS.generic;
-  const fundText = needsBridge
-    ? 'Use a fresh wallet that holds only the funds you plan to farm, fund it with {capital} on Ethereum, then bridge it to {chain} ({bridge} bridge fee, 15 minutes). Never reuse a wallet that holds other assets.'
-    : 'Use a fresh wallet that holds only the funds you plan to farm, and fund it with {capital} on Ethereum. Never reuse a wallet that holds other assets.';
   const steps: FarmStep[] = [
-    { text: fill(fundText, slots), costUsd: needsBridge ? BRIDGE_FEE_USD : 0, minutes: needsBridge ? 30 : 15 },
     {
-      text: fill(
-        "Open {name}'s official site and docs from its DefiLlama listing only, and check the contract addresses match before you connect. Never follow a link from a reply or a DM.",
-        slots,
-      ),
+      text: fill(needsBridge ? SHARED_STEP_TEMPLATES.fundBridge : SHARED_STEP_TEMPLATES.fundDirect, slots),
+      costUsd: needsBridge ? BRIDGE_FEE_USD : 0,
+      minutes: needsBridge ? 30 : 15,
+      when: 'Day 0',
+    },
+    {
+      text: fill(SHARED_STEP_TEMPLATES.verify, slots),
       costUsd: 0,
       minutes: 10,
+      when: 'Day 0',
     },
-    { text: fill(core[0], slots), costUsd: 2 * gasUsd, minutes: 10 },
-    { text: fill(core[1], slots), costUsd: 0, minutes: 10 },
-    { text: fill(core[2], slots), costUsd: 0, minutes: 5 },
+    { text: fill(core[0], slots), costUsd: 2 * gasUsd, minutes: 10, when: 'Day 0' },
+    { text: fill(core[1], slots), costUsd: 0, minutes: 10, when: 'Day 3' },
+    { text: fill(core[2], slots), costUsd: 0, minutes: 5, when: 'Day 3' },
     {
-      text: fill(
-        'Check the position once a week — {weeks} checks over {hold} days, 10 minutes each — and record TVL and any token or points announcement.',
-        slots,
-      ),
+      text: fill(SHARED_STEP_TEMPLATES.weekly, slots),
       costUsd: 0,
       minutes: 10 * weeks,
+      when: `Weekly ×${weeks}`,
     },
     {
-      text: 'Set the exit trigger now: leave if TVL falls 30% from entry, if a token launches and the airdrop snapshot passes, or if the plan fees exceed the slice.',
+      text: fill(SHARED_STEP_TEMPLATES.trigger, slots),
       costUsd: 0,
       minutes: 5,
+      when: `Day ${midDay}`,
     },
     {
-      text: fill(
-        'Claim any points or rewards, withdraw the deposit on {chain}, and revoke the spending approval after the exit transaction confirms.',
-        slots,
-      ),
+      text: fill(SHARED_STEP_TEMPLATES.exit, slots),
       costUsd: 2 * gasUsd,
       minutes: 10,
+      when: `Day ${holdDays}`,
     },
   ];
   const feesUsd = steps.reduce((n, s) => n + s.costUsd, 0);
@@ -771,21 +978,36 @@ export interface BoardResult {
 }
 
 /** The 192-row board: the 40 watchlist protocols plus the 152 pre-token
- *  protocols below the floor with the most TVL. Ranked by implied value,
- *  ties by slug. Every row carries its model parts, its farm plan, and its
- *  netted verdict at the $1,000 ticket. */
+ *  protocols with the highest implied value — no floor filter, no TVL
+ *  ranking for the cut. House-rule set-asides (bridge, CEX, staking,
+ *  versioned, wrapped, exchange-named) never reach the board. Ranked by
+ *  implied value, ties by slug. Every row carries its model parts, its
+ *  rank range over 200 bootstrap refits, its break-even odds, its farm
+ *  plan, and its netted verdict at the $1,000 ticket. */
 export function buildBoard(snapshot: Snapshot): BoardResult {
   const marketMedian = marketMedianChange(snapshot.protocols);
   const compsRes = buildComps(snapshot.protocols);
   const sibWords = siblingFirstWords(snapshot.protocols);
   const watchlist = new Set(snapshot.watchlist);
   const pre = snapshot.protocols.filter((p) => p.gecko_id === null && p.symbol === null);
-  const watchRows = pre.filter((p) => watchlist.has(p.slug));
-  const earlyPool = pre
-    .filter((p) => !watchlist.has(p.slug) && p.tvl_usd < snapshot.floor_usd)
-    .sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0))
-    .slice(0, 152);
+  // The 40 watchlist rows are always on the board — the house-rule
+  // exclusion governs only the 152 early rows. (Two watchlist rows sit in
+  // Restaking / Staking Pool categories the watchlist definition itself
+  // does not exclude, so the exclusion must not touch the watchlist.)
+  const rankable = pre.filter((p) => watchlist.has(p.slug) || boardExclusionReason(p) === null);
+  const watchRows = rankable.filter((p) => watchlist.has(p.slug));
+  if (watchRows.length !== snapshot.watchlist.length) {
+    const missing = snapshot.watchlist.filter((s) => !watchRows.some((p) => p.slug === s));
+    throw new Error(`watchlist rows excluded by the board rule: ${missing.join(', ')}`);
+  }
+  const earlyPool = rankable
+    .filter((p) => !watchlist.has(p.slug))
+    .map((p) => ({ p, value: impliedValue(p, sibWords).value }))
+    .sort((a, b) => b.value - a.value || (a.p.slug < b.p.slug ? -1 : 1))
+    .slice(0, 152)
+    .map(({ p }) => p);
   const boardProtocols = [...watchRows, ...earlyPool];
+  const ranges = rankRanges(boardProtocols, compsRes.comps, sibWords);
 
   const rows: BoardRow[] = boardProtocols.map((p) => {
     const parts = impliedValue(p, sibWords);
@@ -799,6 +1021,7 @@ export function buildBoard(snapshot: Snapshot): BoardResult {
     const verdict = verdictFor(slice, farm.feesUsd, forgone);
     const paysFrom = paysFromUsd(p.tvl_usd, parts.value, farm.feesUsd, holdDays);
     const relChange = (p.change_7d ?? marketMedian) - marketMedian;
+    const range = ranges.get(p.slug) ?? { lo: 0, hi: 0 };
     const nearestPeers = compsRes.comps
       .map((c) => ({
         comp: c,
@@ -816,6 +1039,8 @@ export function buildBoard(snapshot: Snapshot): BoardResult {
       slug: p.slug,
       name: p.name,
       rank: 0,
+      rankLo: range.lo,
+      rankHi: range.hi,
       category: p.category,
       chains: p.chains,
       tvl_usd: p.tvl_usd,
@@ -839,6 +1064,7 @@ export function buildBoard(snapshot: Snapshot): BoardResult {
       sliceUsd: slice,
       netUsd: net,
       netPerHourUsd: net / farm.workHours,
+      breakEvenOdds: breakEvenOdds(slice, farm.feesUsd, forgone),
       verdict,
       paysFromUsd: paysFrom,
       farm_steps: farm.steps.map((s) => s.text),
@@ -875,14 +1101,9 @@ export function buildBoard(snapshot: Snapshot): BoardResult {
   const setAside: SetAsideRow[] = pre
     .filter((p) => !onBoard.has(p.slug))
     .map((p) => {
-      let reason: string;
-      if (p.tvl_usd >= snapshot.floor_usd) {
-        reason =
-          watchlistExclusionReason(p) ??
-          'parent product of a token that already trades (DefiLlama record)';
-      } else {
-        reason = 'below the board cut: not among the 152 early rows by TVL';
-      }
+      const excluded = boardExclusionReason(p);
+      const reason =
+        excluded ?? 'below the board cut: not among the 152 early rows by implied value';
       return { slug: p.slug, name: p.name, category: p.category, tvl_usd: p.tvl_usd, reason };
     })
     .sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : 1));
@@ -908,12 +1129,27 @@ export function boardIssue(rows: BoardRow[], snapshot: Snapshot): string | null 
     }
     if (prev !== null && r.implied_value_usd > prev) return `implied value rises at rank ${r.rank}`;
     prev = r.implied_value_usd;
+    if (!Number.isSafeInteger(r.rankLo) || !Number.isSafeInteger(r.rankHi)) {
+      return `row ${r.slug} has a bad rank range`;
+    }
+    if (r.rankLo < 1 || r.rankHi > rows.length || r.rankLo > r.rank || r.rank > r.rankHi) {
+      return `row ${r.slug} has rank ${r.rank} outside its range ${r.rankLo}-${r.rankHi}`;
+    }
+    if (r.breakEvenOdds !== null && !(r.breakEvenOdds > 0)) {
+      return `row ${r.slug} has bad break-even odds`;
+    }
     if (r.farm_steps.length < 3 || r.farm_steps.length > 12) {
       return `row ${r.slug} has ${r.farm_steps.length} farm steps`;
     }
     for (const s of r.farm_steps) {
       const t = s.trim();
       if (t.length < 20 || t.length > 600) return `row ${r.slug} has a farm step of ${t.length} chars`;
+    }
+    if (r.farmPlan.length !== r.farm_steps.length) {
+      return `row ${r.slug} farm plan and farm steps disagree`;
+    }
+    for (const s of r.farmPlan) {
+      if (!s.when || s.when.length === 0) return `row ${r.slug} has a farm step with no WHEN`;
     }
   }
   for (let i = 1; i <= rows.length; i++) {
@@ -933,7 +1169,9 @@ export function boardIssue(rows: BoardRow[], snapshot: Snapshot): string | null 
  *  plus the constants in meta — one model prices the board and the page.
  *  Keys: s slug, n name, c category, h chains (comma-joined), t TVL,
  *  d change_7d, a age in days, v implied value (whole dollars),
- *  k sibling flag (1 halved), w watchlist flag (1 on the watchlist). */
+ *  k sibling flag (1 halved), w watchlist flag (1 on the watchlist),
+ *  g rank P10 over 200 refits, j rank P90 over 200 refits,
+ *  o break-even odds (fraction, null when the slice is zero). */
 export interface DashboardData {
   meta: {
     model: string;
@@ -951,12 +1189,14 @@ export interface DashboardData {
     bestPerHour: BoardTotals['bestPerHour'];
     siblingRows: number;
     marketMedianPp: number;
+    rankRefits: number;
     curve: { a: number; b: number; r2: number; levelUsd: number; multiple: number };
     categoryEffectsLog10: Record<string, number>;
     breadthWeight: number;
     factorCapLog10: number;
     bandFactors: { p10: number; p25: number; p75: number; p90: number };
     validation: typeof VALIDATION;
+    stepTemplates: { shared: typeof SHARED_STEP_TEMPLATES; core: Record<string, string[]> };
     economics: {
       airdropShare: number;
       tbillRate: number;
@@ -976,6 +1216,9 @@ export interface DashboardData {
     v: number;
     k: number;
     w: number;
+    g: number;
+    j: number;
+    o: number | null;
   }[];
   comps: { s: string; n: string; t: number; m: number }[];
   setAside: { s: string; n: string; c: string | null; t: number; r: string }[];
@@ -984,7 +1227,7 @@ export interface DashboardData {
 export function buildDashboardData(board: BoardResult, snapshot: Snapshot): DashboardData {
   return {
     meta: {
-      model: 'radar-3',
+      model: 'radar-4',
       asOf: snapshot.as_of,
       floorUsd: snapshot.floor_usd,
       boardRows: board.rows.length,
@@ -999,6 +1242,7 @@ export function buildDashboardData(board: BoardResult, snapshot: Snapshot): Dash
       bestPerHour: board.totals.bestPerHour,
       siblingRows: board.totals.siblingRows,
       marketMedianPp: board.marketMedianPp,
+      rankRefits: RANK_REFITS,
       curve: {
         a: CURVE_A,
         b: CURVE_B,
@@ -1016,6 +1260,7 @@ export function buildDashboardData(board: BoardResult, snapshot: Snapshot): Dash
         p90: BAND_P90_FACTOR,
       },
       validation: VALIDATION,
+      stepTemplates: { shared: SHARED_STEP_TEMPLATES, core: CORE_ACTIONS },
       economics: {
         airdropShare: AIRDROP_SHARE,
         tbillRate: TBILL_RATE,
@@ -1035,6 +1280,9 @@ export function buildDashboardData(board: BoardResult, snapshot: Snapshot): Dash
       v: r.implied_value_usd,
       k: r.sibling ? 1 : 0,
       w: snapshot.watchlist.includes(r.slug) ? 1 : 0,
+      g: r.rankLo,
+      j: r.rankHi,
+      o: r.breakEvenOdds,
     })),
     comps: board.comps.map((c) => ({
       s: c.slug,
